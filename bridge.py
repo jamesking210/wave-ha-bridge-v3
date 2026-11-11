@@ -23,9 +23,13 @@ def port_from_file(path=PORT_FILE):
 
 
 def input_mute(device, config):
+    if not isinstance(device, dict) or not isinstance(device.get('inputs', []), list):
+        raise ValueError('Invalid input device message')
     if device.get('id') != config['device_id']:
         return None
     for item in device.get('inputs', []):
+        if not isinstance(item, dict):
+            raise ValueError('Invalid input message')
         if item.get('id') == config['input_id']:
             value = item.get('isMuted')
             return value if type(value) is bool else None
@@ -33,6 +37,8 @@ def input_mute(device, config):
 
 
 def snapshot_mute(result, config):
+    if not isinstance(result, dict):
+        raise ValueError('Invalid input snapshot')
     devices = result.get('inputDevices')
     if not isinstance(devices, list):
         return None
@@ -76,6 +82,9 @@ class Delivery:
         try:
             self.sender(self.config, self.current)
         except Exception as exc:
+            # A timeout can happen after HA applied the state. Its last known
+            # state is now uncertain, including if the mic changes back.
+            self.delivered = None
             # Exception strings may include the webhook URL; log only its type.
             LOG.warning('HA delivery failed (%s); retry latest state in 5s', type(exc).__name__)
             self.retry_at = now + 5
@@ -137,6 +146,9 @@ def run(config, live, capture, seconds):
                 if not isinstance(obj, dict):
                     continue
                 method = obj.get('method')
+                for field in ('result', 'params'):
+                    if field in obj and not isinstance(obj[field], dict):
+                        raise ValueError('Invalid protocol payload')
                 if method != 'levelMeterChanged' and capture:
                     events.info(json.dumps({'time': time.time(), 'message': obj}))
                 if obj.get('id') == 1:
@@ -173,10 +185,15 @@ def run(config, live, capture, seconds):
 
 def validate_config(config):
     from urllib.parse import urlsplit
+    if not isinstance(config, dict):
+        raise ValueError('Configuration must be a JSON object')
     for key in ('device_id', 'input_id', 'ha_base', 'muted_webhook', 'unmuted_webhook'):
         if not isinstance(config.get(key), str) or not config[key].strip():
             raise ValueError('Missing field: ' + key)
     base = urlsplit(config['ha_base'])
+    # Accessing .port validates malformed and out-of-range ports.
+    if base.port is not None and not 1 <= base.port <= 65535:
+        raise ValueError('Invalid Home Assistant port')
     if base.scheme not in ('http', 'https') or not base.hostname or base.username or base.password or base.query or base.fragment or base.path not in ('', '/'):
         raise ValueError('ha_base must be an HTTP(S) server URL without credentials or path')
     import re
@@ -195,6 +212,9 @@ def main():
     parser.add_argument('--capture', action='store_true', help='Capture local protocol frames except meters')
     parser.add_argument('--seconds', type=float, default=0, help='Stop after this duration; 0 runs indefinitely')
     args = parser.parse_args()
+    import math
+    if not math.isfinite(args.seconds) or args.seconds < 0:
+        parser.error('--seconds must be a finite nonnegative number')
     try:
         config = json.loads((ROOT / 'config.json').read_text(encoding='utf-8-sig'))
         validate_config(config)
@@ -221,3 +241,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
