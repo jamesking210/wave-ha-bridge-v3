@@ -1,186 +1,432 @@
 # Wave microphone mute → Home Assistant
 
-Make a light or another Home Assistant automation follow your Elgato Wave microphone's mute button. The bridge runs on your Windows PC, reads microphone mute state from Wave Link 3, and sends a webhook when that state changes.
+Use your Wave microphone's mute control to turn an ON-AIR light off when muted and on when unmuted.
 
-A simple use: turn an ON-AIR light off when muted and on when unmuted. You choose what the Home Assistant automations do.
+This guide walks you through installing the bridge on Windows, connecting it to Home Assistant, testing it, and making it start when you sign in. You can use the same webhooks for other Home Assistant actions.
 
-No Stream Deck hardware, Stream Deck software, Streamer.bot, Home Assistant token, or custom HA integration is required by this bridge. Wave Link itself must be running.
+**Tested with:** Elgato Wave:3, Wave Link 3.3.0.4529, and Python 3.13 on Windows. Other Wave models need the mute test in Step 4 before use.
 
-## Compatibility
+## Before you start
 
-| Component | Status |
-| --- | --- |
-| Windows, Python 3.13, Wave Link 3.3.0.4529 | Tested |
-| Elgato Wave:3 touch mute | Tested |
-| Wave:3 software microphone mute | Tested; reports the same input mute field |
-| Other Wave microphones / interfaces | Not yet verified; discovery supports inputs exposing a boolean `isMuted` field |
-| Mixer channel mute, per-mix mute, Windows mute, meeting-app mute | Not mapped |
-| macOS / Linux / Wave Link 2 | Not supported by this implementation |
+You need:
 
-This uses an **unofficial local API**. It is not an Elgato product. Other devices and future Wave Link versions need their own verification. The program matches one exact device/input pair, never a name substring or all microphones at once.
+- A Windows PC with **Wave Link 3** installed and running.
+- Your microphone connected and visible in Wave Link.
+- **Python 3.10 or newer** installed. Python 3.13 is the tested version.
+- Home Assistant accessible from this PC on your local network.
+- A light already working in Home Assistant. Confirm you can turn it on and off there first.
 
-## Requirements
+The bridge does not require Stream Deck, Streamer.bot, a Home Assistant access token, or a custom HA integration.
 
-- Windows PC with Wave Link 3 running under your Windows account.
-- A microphone listed in Wave Link's input devices.
-- Python 3.10 or newer available as `python` in PowerShell. Only 3.13 has been tested here.
-- Home Assistant reachable from that PC on your local network.
+> **Already using this bridge?** You do not need to repeat setup to use this README. Keep your existing `config.json`. Stop the scheduled task before running any foreground tests.
 
-## 1. Install and choose a microphone
+## Setup steps
 
-Download/extract this project to a permanent folder. Open PowerShell there:
+1. [Download the project](#1-download-the-project)
+2. [Install the Python dependency](#2-install-the-python-dependency)
+3. [Choose your microphone](#3-choose-your-microphone)
+4. [Check mute detection](#4-check-mute-detection)
+5. [Create the Home Assistant automations](#5-create-the-home-assistant-automations)
+6. [Test the light](#6-test-the-light)
+7. [Start automatically at login](#7-start-automatically-at-login)
+
+---
+
+## 1. Download the project
+
+1. At the top of [this repository](https://github.com/jamesking210/wave-ha-bridge-v3), click **Code → Download ZIP**.
+2. Extract the ZIP.
+3. Move the project files into a permanent folder. This guide uses:
+
+   ```text
+   C:\scripts\wave-ha-bridge-v3
+   ```
+
+Make sure `bridge.py`, `setup.ps1`, and `README.md` are directly inside that folder—not inside another nested folder.
+
+Open **PowerShell** and enter:
+
+```powershell
+Set-Location "C:\scripts\wave-ha-bridge-v3"
+Get-ChildItem
+```
+
+**Checkpoint:** You should see `bridge.py`, `configure.py`, and `setup.ps1` in the list.
+
+All following commands run in this same PowerShell window and folder. If you chose a different folder, use that path instead.
+
+## 2. Install the Python dependency
+
+Check that Python is available:
+
+```powershell
+python --version
+```
+
+**Checkpoint:** You should see `Python 3.10` or a newer version.
+
+If the command is not found or opens the Microsoft Store, install Python from [python.org](https://www.python.org/downloads/windows/) and make sure it is available on PATH. Close and reopen PowerShell, return to the project folder, and check again.
+
+Now run:
 
 ```powershell
 .\setup.ps1
+```
+
+This creates a private Python environment in `.venv`, installs the dependency, and runs the project's tests.
+
+**Checkpoint:** The test output should end with **OK**. Do not continue if setup reports an error.
+
+<details>
+<summary>PowerShell says scripts are blocked</summary>
+
+Review the downloaded scripts, then unblock the scripts used by this guide:
+
+```powershell
+Unblock-File .\setup.ps1
+Unblock-File .\install-startup.ps1
+Unblock-File .\uninstall-startup.ps1
+```
+
+Try `.\setup.ps1` again. If your computer's execution policy still blocks it, follow your Windows or organization policy. Unblocking a download does not override an enforced execution policy.
+
+</details>
+
+## 3. Choose your microphone
+
+Leave Wave Link open, then run:
+
+```powershell
 .\.venv\Scripts\python.exe configure.py
 ```
 
-Setup creates an isolated Python environment and runs the tests. The configuration wizard reads Wave Link's inputs, lets you choose your microphone, asks for your Home Assistant URL, and writes **private `config.json`** with two randomly generated webhook IDs. It does not change your microphone or send webhooks. It refuses to overwrite an existing configuration.
+The wizard will:
 
-If PowerShell blocks a downloaded script, review it and use `Unblock-File .\setup.ps1` (and the other scripts you intend to run). Follow your organization's execution policy if it still prevents scripts.
+1. Connect to Wave Link.
+2. List the available microphone inputs.
+3. Ask you to enter the number beside your Wave microphone.
+4. Ask for your Home Assistant base URL.
 
-`config.example.json` documents the fields for manual setup. Do not use its placeholder IDs unchanged.
+For the URL, enter the local address you use to reach Home Assistant, for example:
 
-## 2. Create the Home Assistant automations
+```text
+http://homeassistant.local:8123
+```
 
-Open `config.json` locally. Create two automations in Home Assistant, each with a **Webhook** trigger:
+You can also use your Home Assistant server's LAN IP address. Enter only the server address and port—do not include a dashboard path or `/api/webhook/`.
 
-| Trigger's webhook ID | Allowed method | Example action |
-| --- | --- | --- |
-| Value of `muted_webhook` | POST | Turn your ON-AIR light off |
-| Value of `unmuted_webhook` | POST | Turn your ON-AIR light on |
+**Checkpoint:** You should see:
 
-Keep **Only accessible from the local network** enabled. Copy the IDs exactly; the bridge constructs `/api/webhook/<ID>` from your `ha_base`. Do not paste the full webhook URL into an ID field.
+```text
+Created private config.json with two random webhook IDs.
+```
 
-See [examples/home-assistant.yaml](examples/home-assistant.yaml) for two complete example automations. Replace the placeholder IDs and light entity. In the HA UI's YAML editor, paste one automation at a time without its leading list dash. Save and enable both automations. If editing `automations.yaml` directly, reload automations afterwards.
+The generated `config.json` contains your microphone selection and two private webhook IDs. **Do not upload this file to GitHub or share its contents.** The wizard will not overwrite an existing file.
 
-For WLED, you can replace the unmuted action with `select.select_option`, using your WLED preset select entity and an existing preset such as `White Solid`. Preset names and entity IDs depend on your setup.
+## 4. Check mute detection
 
-Webhook IDs function as secrets. No HA access token is needed. Keep completed YAML and `config.json` private. See the [official HA webhook documentation](https://www.home-assistant.io/triggers/webhook/).
+First, check that the bridge reads your mute control correctly. This test **does not send anything to Home Assistant**.
 
-## 3. Verify mute semantics without sending anything
+Run:
 
 ```powershell
 .\.venv\Scripts\python.exe bridge.py --capture
 ```
 
-This is **dry-run mode**. No webhooks are sent without `--live`.
+Leave it running and perform these checks:
 
-1. Note the reported MUTED or UNMUTED state and compare it with your microphone.
-2. Use the hardware mute control. Wait about five seconds. Confirm the displayed state matches. Toggle back and confirm again.
-3. Repeat with the software microphone mute control you normally use.
-4. Confirm unrelated channel/mix controls do not masquerade as microphone mute.
-5. Press Ctrl+C to stop.
+| What you do | What you should see |
+| --- | --- |
+| Mute the microphone using its hardware control | `Input state: MUTED` and `DRY RUN: would send muted` |
+| Wait about five seconds, then unmute it | `Input state: UNMUTED` and `DRY RUN: would send unmuted` |
+| Repeat with the software microphone mute control you use in Wave Link | The same matching mute/unmute messages |
 
-Expected output includes `Input state: MUTED` followed by `DRY RUN: would send muted`, or the corresponding unmuted messages. Unchanged state is not repeatedly sent.
+The initial state also appears when the program starts. It does not repeatedly print an unchanged state.
 
-If both controls behave correctly, edit **your local** `config.json` and set:
+**Checkpoint:** The displayed state agrees with the microphone for both controls.
 
-```json
-"semantics_verified": true
+Press **Ctrl+C** to stop the test.
+
+If a control does not produce the correct state, stop here and check [Troubleshooting](#troubleshooting). Mixer-channel, individual mix, Windows, and meeting-app mute are different controls and are not mapped by this bridge.
+
+Once the test passes, open the configuration:
+
+```powershell
+notepad .\config.json
 ```
 
-If a control does not report the right state, leave this false. Check the chosen input and inspect local `logs/events.jsonl`. Do not guess based on audio levels or channel mute. Other microphone models may expose different behavior.
+Find:
 
-## 4. Test live, then start automatically
+```json
+"semantics_verified": false
+```
 
-With both HA automations enabled:
+Change only `false` to `true`, keeping any comma at the end of the line. Save the file.
+
+This setting confirms that you checked mute detection. Live mode refuses to run until it is true.
+
+## 5. Create the Home Assistant automations
+
+You will create **two automations**: one for muted and one for unmuted.
+
+Keep `config.json` open locally so you can copy the generated IDs. Copy only the text between the quotation marks for each ID.
+
+### Find your light's entity ID
+
+In Home Assistant, open **Developer Tools → States**, find your light, and note its entity ID. It will look like:
+
+```text
+light.your_on_air_light
+```
+
+Use your actual entity ID in both examples below.
+
+### A. Turn the light off when muted
+
+In Home Assistant:
+
+1. Open **Settings → Automations & scenes**.
+2. Create a new, empty automation.
+3. Open its menu and choose **Edit in YAML**.
+4. Replace the editor contents with this example:
+
+```yaml
+alias: Wave microphone muted
+triggers:
+  - trigger: webhook
+    webhook_id: "PASTE_YOUR_MUTED_WEBHOOK_ID_HERE"
+    allowed_methods:
+      - POST
+    local_only: true
+actions:
+  - action: light.turn_off
+    target:
+      entity_id: light.your_on_air_light
+mode: restart
+```
+
+Replace:
+
+- `PASTE_YOUR_MUTED_WEBHOOK_ID_HERE` with the value of **`muted_webhook`** from your private `config.json`.
+- `light.your_on_air_light` with your light's entity ID.
+
+Save the automation and make sure it is enabled.
+
+### B. Turn the light on when unmuted
+
+Create a **second** empty automation. Open its YAML editor and paste:
+
+```yaml
+alias: Wave microphone unmuted
+triggers:
+  - trigger: webhook
+    webhook_id: "PASTE_YOUR_UNMUTED_WEBHOOK_ID_HERE"
+    allowed_methods:
+      - POST
+    local_only: true
+actions:
+  - action: light.turn_on
+    target:
+      entity_id: light.your_on_air_light
+mode: restart
+```
+
+Replace:
+
+- `PASTE_YOUR_UNMUTED_WEBHOOK_ID_HERE` with the value of **`unmuted_webhook`** from `config.json`.
+- `light.your_on_air_light` with the same light's entity ID.
+
+Save and enable this automation too.
+
+**Checkpoint:** You now have two enabled automations with **different webhook IDs** that match your configuration. Keep `local_only: true`; the PC and Home Assistant must communicate over the local network.
+
+<details>
+<summary>Optional: select a WLED preset when unmuted</summary>
+
+First create the preset in WLED and confirm Home Assistant can select it.
+
+In the **unmuted** automation, replace the `actions` section with:
+
+```yaml
+actions:
+  - action: select.select_option
+    target:
+      entity_id: select.your_wled_preset
+    data:
+      option: "White Solid"
+```
+
+Replace the entity ID with your WLED preset select entity and `White Solid` with the exact name of your existing preset. Keep the muted automation's light-off action.
+
+</details>
+
+The repository also includes [both automations in one example file](examples/home-assistant.yaml) for people editing `automations.yaml` directly. The separate examples above are ready for the UI editor.
+
+## 6. Test the light
+
+Back in PowerShell, run:
 
 ```powershell
 .\.venv\Scripts\python.exe bridge.py --live
 ```
 
-The fresh current state is sent once on startup. Test mute and unmute and verify the actual light/action in HA. `HA accepted` means the HTTP request succeeded; it does not prove an automation ran. Check HA automation traces if the action does not happen.
+**Live mode sends the microphone's current state immediately**, so your light may change as soon as the program starts.
 
-Stop with Ctrl+C, then install the login task:
+Now test:
+
+| Microphone state | Expected result |
+| --- | --- |
+| Muted | Light turns off |
+| Unmuted | Light turns on, or selects your configured WLED preset |
+
+Repeat with the hardware control and your tested software microphone mute control.
+
+**Checkpoint:** The actual light follows mute and unmute. The console should also show `HA accepted muted` or `HA accepted unmuted`.
+
+If the console says `HA accepted` but the light does not change, check the automation's **Traces**, webhook ID, and target entity in Home Assistant. HTTP acceptance alone does not prove the automation ran.
+
+Once both directions work, press **Ctrl+C** to stop the foreground bridge.
+
+## 7. Start automatically at login
+
+Run:
 
 ```powershell
 .\install-startup.ps1 -Live
 ```
 
-The task `WaveHA-Bridge-v3` runs hidden under the current user, starts at login, and waits/reconnects if Wave Link is not ready. It does not run before login or launch Wave Link for you. Without `-Live`, the installer creates a dry-run task. Reinstalling stops and replaces the existing task with the selected mode.
+This installs and starts a Windows scheduled task named **WaveHA-Bridge-v3**. It runs in the background under your Windows account.
 
-Keep the folder in place after installing. If you move it, rerun the installer from its new location. This project supports one installed bridge task per PC; do not run other mute bridges alongside it.
-
-## Everyday commands
+Check it:
 
 ```powershell
 Get-ScheduledTask -TaskName WaveHA-Bridge-v3
+```
+
+**Checkpoint:** Its state should be **Running**. Test mute and unmute once more with the foreground window no longer running.
+
+Setup is complete. Keep the project folder in place and make sure Wave Link starts when you sign in. The bridge retries if Wave Link is not ready yet; it does not launch Wave Link itself.
+
+---
+
+## Using it later
+
+Run these commands from the project folder. Each block is a separate action.
+
+**View recent activity:**
+
+```powershell
 Get-Content .\logs\bridge.log -Tail 30 -Wait
+```
+
+Press Ctrl+C to stop watching the log; this does not stop the background bridge.
+
+**Stop the bridge:**
+
+```powershell
 Stop-ScheduledTask -TaskName WaveHA-Bridge-v3
+```
+
+**Start the bridge:**
+
+```powershell
 Start-ScheduledTask -TaskName WaveHA-Bridge-v3
 ```
 
-To capture a problem safely, stop the task, then run:
-
-```powershell
-.\.venv\Scripts\python.exe bridge.py --capture --seconds 60
-```
-
-Restart the task afterwards. `dry-run.cmd` is a double-click alternative. The process lock prevents two bridge workers in the same project folder. Captures can contain device identifiers; redact them before sharing.
-
-Remove automatic startup with:
+**Remove automatic startup:**
 
 ```powershell
 .\uninstall-startup.ps1
 ```
 
-This stops/removes the task but keeps your files. It does not modify any other bridge installation.
-
-## How it works
-
-```text
-Wave microphone mute
-    → Wave Link 3 local WebSocket
-    → exact input isMuted boolean
-    → muted / unmuted HTTP POST
-    → your Home Assistant automation
-```
-
-- Reads `%LOCALAPPDATA%\Packages\Elgato.WaveLink_g54w8ztgkx496\LocalState\ws-info.json` on every connection; no fixed port or broad port scan.
-- Connects only to `127.0.0.1` with `Origin: streamdeck://`. The header does not require Stream Deck.
-- Checks `getApplicationInfo`, reads `getInputDevices`, and listens for `inputDeviceChanged` / `inputDevicesChanged`.
-- Polls a fresh input snapshot every five seconds to recover missed events. Typical notification delivery is immediate; network retries and polling can add delay.
-- Reconnects with backoff capped at about 30 seconds. It never writes microphone settings.
-- Deduplicates states in memory. No old saved state is sent after restart; each new process sends its fresh initial state once.
-- Retries a failed HA request after five seconds using the latest known state. Disconnects and missing inputs become UNKNOWN and send nothing.
-- Normal logs rotate at 1 MB with three backups; optional event captures at 2 MB with two backups. Meter events are excluded from captures.
-
-Network delivery is not exactly once: a timeout after HA accepted a request can cause a retry. Keep the HA actions idempotent (set on/off rather than toggle). A disconnection leaves HA in its last state; this is not a safety-critical indicator. If HA is restarted and forgets the light state without a microphone change, restart the bridge to resync.
+This stops and removes the task but keeps your files.
 
 ## Troubleshooting
 
-| Symptom | Check |
+| Problem | What to do |
 | --- | --- |
-| No connection / missing port file | Wave Link 3 must run in the same Windows account. Its package path must match the path above. |
-| UNKNOWN state | Selected device/input is missing or no longer exposes a boolean mute field. Reconnect the mic; rediscover if it was replaced. |
-| Wrong control affects the light | Verify input mute separately from channel, mix, Windows, and app mute. |
-| HA accepted but nothing happens | Matching webhook IDs, enabled automations, entity IDs, and HA automation traces. |
-| HA delivery failed | Base URL, port/firewall, LAN access, and HTTP(S) connectivity. Exception types are logged without secret URLs. |
-| Already running | Stop the scheduled task before foreground testing. |
-| Works manually, not at login | Check Task Scheduler and logs; ensure Wave Link starts and the project folder has not moved. |
+| PowerShell cannot find a project file | Return to the folder containing `bridge.py` using `Set-Location`. |
+| Configuration says it already exists | Keep it if this is your working setup. To change microphones, stop the task, back up and rename `config.json`, then repeat Steps 3–6. New webhook IDs must also be updated in HA. |
+| Wave Link is unavailable or its port file is missing | Open Wave Link 3 under the same Windows account. Confirm the microphone is connected. |
+| State is UNKNOWN or never changes | Check the selected input and hardware connection. Your model or control may not expose the required mute state. Do not enable live mode until the test passes. |
+| Live mode says semantics are not verified | Complete Step 4, then set `semantics_verified` to JSON boolean `true` and save. |
+| HA delivery failed | Check the base URL, port, firewall, and that the PC can reach HA over the LAN. |
+| HA accepted, but the light does nothing | Check HA automation traces, matching webhook IDs, enabled automations, and the light entity. |
+| A bridge is already running | Stop the scheduled task and any foreground bridge before another manual test. |
+| It works manually but not after login | Check Task Scheduler and `logs/bridge.log`. Confirm Wave Link starts and the project folder has not moved. |
 
-Changing microphones: stop the task, back up and rename private `config.json`, run `configure.py`, and repeat verification. New configuration generates new webhook IDs; update HA too, or deliberately retain your previous private IDs.
+### Capture events for troubleshooting
 
-## Development and publishing
+Stop the scheduled task first:
+
+```powershell
+Stop-ScheduledTask -TaskName WaveHA-Bridge-v3
+```
+
+Run a one-minute dry-run capture and operate the mute control during that minute:
+
+```powershell
+.\.venv\Scripts\python.exe bridge.py --capture --seconds 60
+```
+
+After it finishes, restart the task:
+
+```powershell
+Start-ScheduledTask -TaskName WaveHA-Bridge-v3
+```
+
+Captures are stored in `logs/events.jsonl`. They can contain device identifiers; redact them before posting an issue. Never share `config.json` or your webhook IDs.
+
+## Compatibility and behavior
+
+- **Verified:** Wave:3 hardware touch mute and software microphone mute on Wave Link 3.3.0.4529, Windows, Python 3.13.
+- **Other Wave models:** may work if Wave Link exposes an input-level boolean `isMuted`; verify each control before enabling live mode.
+- **Not covered:** mixer-channel, per-mix, Windows endpoint, or conferencing-app mute.
+- **Not supported:** Wave Link 2, macOS, or Linux.
+- This is an unofficial community bridge, not an Elgato product.
+
+The bridge discovers Wave Link's port on each connection, listens for input changes, and refreshes state every five seconds. It reconnects automatically and retries failed webhook requests using the latest known state.
+
+Unchanged states are deduplicated. A new process sends its fresh initial state once. When the microphone is missing or disconnected, the bridge sends nothing and HA retains its last state. Restart the bridge if you need to resync after an HA restart.
+
+Use actions that **set** a state, such as turn on/off, rather than toggle: an HTTP timeout can occasionally cause a retry after HA has already accepted a request. This is not a safety-critical mute indicator.
+
+<details>
+<summary>Technical details and development</summary>
+
+The local API connection uses:
+
+- Port file: `%LOCALAPPDATA%\Packages\Elgato.WaveLink_g54w8ztgkx496\LocalState\ws-info.json`
+- WebSocket: `ws://127.0.0.1:<discovered-port>`
+- Origin: `streamdeck://` (a handshake header; no Stream Deck installation required)
+- Read methods: `getApplicationInfo`, `getInputDevices`
+- Notifications: `inputDeviceChanged`, `inputDevicesChanged`
+
+The bridge matches exact device and input IDs. It never sends setters to change microphone settings. Reconnect backoff is capped at about 30 seconds. Logs rotate automatically; high-volume meter events are excluded from captures.
+
+Run tests:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s . -p test_bridge.py
+```
+
+Build a public-file-only ZIP:
+
+```powershell
 .\package-release.ps1
 ```
 
-The release script creates `dist/wave-ha-bridge-v3.zip` from an explicit list of public files. **Use that ZIP's contents for GitHub's browser upload**, not the whole working directory. `.gitignore` protects Git workflows; it does not filter files dragged into a browser.
+The output is `dist/wave-ha-bridge-v3.zip`. Use its extracted contents for GitHub browser uploads. The working folder contains private configuration and logs that must not be published; `.gitignore` does not filter browser uploads.
 
-Private runtime files (`config.json`, `.local/`, `logs/`, `.venv/`, caches, locks, and migration flags) are excluded. The example configuration contains placeholders only. Do not add completed HA YAML to the public repository.
+Hardware/software mute and a physical light test passed on the verified setup. Physical reboot, port-change, unplug/replug, and HA outage testing still need broader coverage.
 
-The existing Wave:3 installation passed hardware/software event checks and a physical ON-AIR light test. Automated tests cover state matching, delivery/retry behavior, configuration validation, discovery filtering, and port validation. Physical reboot, port-change, unplug/replug, and HA outage scenarios still need broader hardware testing. Contributions reporting other Wave models should include OS and Wave Link version plus redacted event shapes, never webhook IDs or raw private captures.
+</details>
 
-No license has been selected for this repository yet. Choose an appropriate license before inviting redistribution; public GitHub visibility alone is not an open-source license.
+## References
 
-## Protocol references
-
+- [Home Assistant webhook documentation](https://www.home-assistant.io/triggers/webhook/)
 - [WaveLink.Client protocol notes](https://github.com/Agash/WaveLink.Client/blob/main/PROTOCOL.md)
 - [Unofficial node-wave-link-sdk](https://github.com/DarrellVS/node-wave-link-sdk)
 - [wavelink-knob connection notes](https://github.com/idlewatts/wavelink-knob)
 
-Community documentation guided development. Actual events from the tested Wave:3 determined its mute mapping.
+Community documentation guided development; live Wave:3 events determined the tested mute mapping.
