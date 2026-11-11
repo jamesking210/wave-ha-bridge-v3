@@ -1,0 +1,26 @@
+# Two separate automations. For the UI YAML editor, paste one automation
+# at a time without its leading list dash. Replace IDs and entity names.
+# IDs must match your PRIVATE config.json; never commit the completed YAML.
+- alias: Wave microphone muted
+  triggers:
+    - trigger: webhook
+      webhook_id: REPLACE_WITH_RANDOM_MUTED_WEBHOOK_ID
+      allowed_methods: [POST]
+      local_only: true
+  actions:
+    - action: light.turn_off
+      target:
+        entity_id: light.your_on_air_light
+  mode: restart
+
+- alias: Wave microphone unmuted
+  triggers:
+    - trigger: webhook
+      webhook_id: REPLACE_WITH_DIFFERENT_RANDOM_UNMUTED_WEBHOOK_ID
+      allowed_methods: [POST]
+      local_only: true
+  actions:
+    - action: light.turn_on
+      target:
+        entity_id: light.your_on_air_light
+  mode: restart

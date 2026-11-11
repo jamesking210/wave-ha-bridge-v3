@@ -1,0 +1,8 @@
+{
+  "device_id": "REPLACE_WITH_DISCOVERED_DEVICE_ID",
+  "input_id": "REPLACE_WITH_DISCOVERED_INPUT_ID",
+  "semantics_verified": false,
+  "ha_base": "http://homeassistant.local:8123",
+  "muted_webhook": "REPLACE_WITH_RANDOM_MUTED_WEBHOOK_ID",
+  "unmuted_webhook": "REPLACE_WITH_DIFFERENT_RANDOM_UNMUTED_WEBHOOK_ID"
+}
